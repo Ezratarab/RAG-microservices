@@ -21,7 +21,7 @@ public class BillingService {
 
     public Long payBill(PaymentDTO paymentDTO) {
         Payment payment = Payment.builder()
-                //.customerId(paymentDTO.getCustomerId()) לעשות שיעבוד עם KEYCLOCK
+                .customerId(paymentDTO.getCustomerId())
                 .billPrice(paymentDTO.getBillPrice())
                 .cardNumber(paymentDTO.getCardNumber())
                 .cardHolder(paymentDTO.getCardHolder())

@@ -5,6 +5,7 @@
       <module fileurl="file://$PROJECT_DIR$/.idea/SaasProjBackend.iml" filepath="$PROJECT_DIR$/.idea/SaasProjBackend.iml" />
       <module fileurl="file://$PROJECT_DIR$/auth-service/auth-service/auth-service.iml" filepath="$PROJECT_DIR$/auth-service/auth-service/auth-service.iml" />
       <module fileurl="file://$PROJECT_DIR$/billing-service/billing-service/billing-service.iml" filepath="$PROJECT_DIR$/billing-service/billing-service/billing-service.iml" />
+      <module fileurl="file://$PROJECT_DIR$/rag-service/rag-service/rag-service.iml" filepath="$PROJECT_DIR$/rag-service/rag-service/rag-service.iml" />
     </modules>
   </component>
 </project>
