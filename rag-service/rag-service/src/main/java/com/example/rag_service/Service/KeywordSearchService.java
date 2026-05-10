@@ -3,6 +3,8 @@ package com.example.rag_service.Service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import redis.clients.jedis.JedisPooled;
 import redis.clients.jedis.search.Document;
@@ -13,9 +15,10 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class KeywordSearchService {
 
-    private final JedisPooled jedis = new JedisPooled("localhost", 6379);
+    private final JedisPooled jedis;
 
     public SearchResult search(String query) {
         String redisQuery =
@@ -30,20 +33,7 @@ public class KeywordSearchService {
     }
 
     public String extractContent(Document doc) {
-        try {
-            Object jsonObj = doc.get("$");
-
-            if (jsonObj != null) {
-                String jsonString = jsonObj.toString();
-
-                ObjectMapper mapper = new ObjectMapper();
-                JsonNode node = mapper.readTree(jsonString);
-
-                return node.get("content").asText();
-            }
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
-        return "doesnt exist";
+        Object content = doc.get("content");
+        return content != null ? content.toString() : null;
     }
 }

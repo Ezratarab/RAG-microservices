@@ -2,11 +2,13 @@ package com.example.rag_service.NLP;
 
 import opennlp.tools.tokenize.TokenizerME;
 import opennlp.tools.tokenize.TokenizerModel;
+import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Service
 public class NlpProcessor {
 
     private final TokenizerME tokenizer;

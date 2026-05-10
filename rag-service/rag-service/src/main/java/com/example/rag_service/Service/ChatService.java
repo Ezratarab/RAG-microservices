@@ -14,6 +14,8 @@ public class ChatService {
     }
 
     public Flux<String> ask(String context, String query) {
+        System.out.println("START CHAT SERVICE");
+
         String prompt = """
                 You are a helpful AI assistant.
                 
@@ -31,7 +33,6 @@ public class ChatService {
                 Question:
                 %s
                 """.formatted(context, query);
-
         return chatClient.prompt()
                 .system("You are a precise factual assistant.")
                 .user(prompt)

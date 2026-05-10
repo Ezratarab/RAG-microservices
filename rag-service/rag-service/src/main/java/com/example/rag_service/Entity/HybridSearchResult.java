@@ -1,9 +1,14 @@
 package com.example.rag_service.Entity;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
+@AllArgsConstructor
+@NoArgsConstructor
 public class HybridSearchResult {
+    private String id;
     private String content;
     //scores
 //    private double vectoreScore;

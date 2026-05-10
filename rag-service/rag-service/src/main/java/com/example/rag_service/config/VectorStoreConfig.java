@@ -1,6 +1,6 @@
 package com.example.rag_service.config;
 
-import org.apache.commons.pool2.impl.GenericObjectPool;
+import jakarta.annotation.PostConstruct;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -8,10 +8,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.redis.RedisVectorStore;
+import org.springframework.context.annotation.Primary;
 import redis.clients.jedis.Connection;
 import redis.clients.jedis.JedisPooled;
-
-import java.lang.reflect.Field;
 
 @Configuration
 public class VectorStoreConfig {
@@ -25,16 +24,23 @@ public class VectorStoreConfig {
     @Value("${spring.data.redis.jedis.pool.timeout:2000}")
     private int socketTimeout;
 
+    @PostConstruct
+    public void debug() {
+        System.out.println("REDIS HOST = " + redisHost);
+        System.out.println("REDIS PORT = " + redisPort);
+    }
+
     @Bean
     public JedisPooled jedisPooled() {
         GenericObjectPoolConfig<Connection> pooledConfig = new GenericObjectPoolConfig<>();
         pooledConfig.setMaxTotal(maxConnections);
 
-        return new JedisPooled(pooledConfig, redisHost, redisPort, socketTimeout);
+        return new JedisPooled(redisHost, redisPort);
     }
-    
 
-    @Bean
+
+    @Bean(name = "vectorStore")
+    @Primary
     public VectorStore vectorStore(JedisPooled jedisPooled, EmbeddingModel embeddingModel) {
         return RedisVectorStore.builder(jedisPooled, embeddingModel)
                 .indexName("rag-index")

@@ -1,5 +1,6 @@
 package com.example.rag_service;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
