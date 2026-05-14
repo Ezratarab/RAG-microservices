@@ -1,149 +1,133 @@
 package com.example.rag_service.NLP;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
-import org.apache.poi.xwpf.usermodel.XWPFDocument;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
-import lombok.extern.slf4j.Slf4j;
+import java.util.*;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
 @AllArgsConstructor
 public class PdfParser {
+
     private final VectorStore vectorStore;
 
-    //publisher
+
     public void uploadFile(String fileName, InputStream inputStream) throws IOException {
-        List<String> units;
-        String lower = fileName
-                .trim()
-                .toLowerCase()
-                .replaceAll("\\s+", "");
+        String text;
         try (inputStream) {
-            if (lower.endsWith(".pdf")) {
-                units = parsePDF(inputStream);
-            } else if (lower.endsWith(".docx")) {
-                units = parseDOCX(inputStream);
+            if (fileName.toLowerCase().endsWith(".pdf")) {
+                text = parsePDF(inputStream);
+            } else if (fileName.toLowerCase().endsWith(".docx")) {
+                text = parseDOCX(inputStream);
             } else {
                 throw new IllegalArgumentException("Unsupported file type: " + fileName);
             }
         }
+        text = cleanText(text);
+        List<Document> chunks = chunkText(fileName, text, 1200, 150);
 
-        List<Document> allChunks = new ArrayList<>();
-        int globalIndex = 0;
-
-        for (int i = 0; i < units.size(); i++) {
-            String unitText = units.get(i);
-            if (unitText.isBlank()) continue;
-            List<Document> chunks = chunkText(fileName, unitText, 5000, 500);
-            for (Document doc : chunks) {
-                log.info("Processed file={}", fileName);
-                doc.getMetadata().putAll(Map.of(
-                        "fileName", fileName,
-                        "unitIndex", i + 1,
-                        "chunkIndex", globalIndex++,
-                        "length", doc.getText().length()
-                ));
-            }
-            allChunks.addAll(chunks);
+        for (int i = 0; i < chunks.size(); i++) {
+            chunks.get(i).getMetadata().putAll(Map.of(
+                    "fileName", fileName,
+                    "chunkIndex", i,
+                    "length", chunks.get(i).getText().length()
+            ));
         }
-        vectorStore.add(allChunks);
+        vectorStore.add(chunks);
+        log.info("Uploaded file {} with {} chunks", fileName, chunks.size());
     }
 
-    //chunk consumer
     public List<Document> chunkText(String fileName, String text, int maxChars, int overlapChars) {
         List<String> sentences = splitIntoSentences(text);
-
         List<Document> chunks = new ArrayList<>();
-        StringBuilder currentChunk = new StringBuilder();
-
+        StringBuilder current = new StringBuilder();
         int index = 0;
-
         for (String sentence : sentences) {
-
-            if (currentChunk.length() + sentence.length() > maxChars) {
-
-                chunks.add(new Document(currentChunk.toString().trim(), Map.of(
-                        "fileName", fileName,
-                        "chunkIndex", index++
-                )));
-
-                int overlapStart = Math.max(0, currentChunk.length() - overlapChars);
-                currentChunk = new StringBuilder(currentChunk.substring(overlapStart));
+            sentence = sentence.trim();
+            if (isNoise(sentence)) continue;
+            if (current.length() + sentence.length() > maxChars) {
+                addChunk(chunks, current.toString(), fileName, index++);
+                current = new StringBuilder(getOverlap(current.toString(), overlapChars));
             }
-
-            currentChunk.append(sentence).append(" ");
+            current.append(sentence).append(" ");
         }
-
-        if (!currentChunk.isEmpty()) {
-            String chunkText = currentChunk.toString().trim();
-            if (!chunkText.isBlank()) {
-                Document chunk = new Document(chunkText, Map.of(
-                        "fileName", fileName,
-                        "chunkIndex", index
-                ));
-                chunks.add(chunk);
-            }
+        if (!current.isEmpty()) {
+            addChunk(chunks, current.toString(), fileName, index);
         }
-
         return chunks;
     }
 
-    private List<String> splitIntoSentences(String text) {
-        return List.of(text.split("(?<=[.!?])\\s+"));
+    private void addChunk(List<Document> chunks, String text, String fileName, int index) {
+        String cleaned = text.trim();
+        if (cleaned.length() < 50) return;
+        chunks.add(new Document(cleaned, Map.of(
+                "content", cleaned,
+                "fileName", fileName,
+                "chunkIndex", index,
+                "length", cleaned.length()
+        )));
     }
 
-    // parse pdf consumer
-    public List<String> parsePDF(InputStream inputStream) throws IOException {
-        List<String> pagesText = new ArrayList<>();
+    private String cleanText(String text) {
+        return text
+                .replaceAll("\\b/\\w+\\b", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
 
+    private boolean isNoise(String sentence) {
+        if (sentence == null) return true;
+        if (sentence.length() < 20) return true;
+        if (Pattern.matches("^[a-zA-Z0-9_./]+$", sentence)) return true;
+
+        return false;
+    }
+
+    private String getOverlap(String text, int maxChars) {
+        if (text.length() <= maxChars) return text;
+        return text.substring(text.length() - maxChars);
+    }
+
+    private List<String> splitIntoSentences(String text) {
+        return Arrays.asList(
+                text.split("(?<=[.!?])\\s+")
+        );
+    }
+
+    public String parsePDF(InputStream inputStream) throws IOException {
+        StringBuilder text = new StringBuilder();
         try (PDDocument document = Loader.loadPDF(new RandomAccessReadBuffer(inputStream))) {
-
             if (document.isEncrypted()) {
                 throw new IllegalStateException("Document is encrypted.");
             }
-
             PDFTextStripper stripper = new PDFTextStripper();
-
-            int totalPages = document.getNumberOfPages();
-
-            for (int i = 1; i <= totalPages; i++) {
-                stripper.setStartPage(i);
-                stripper.setEndPage(i);
-
-                String pageText = stripper.getText(document);
-                pagesText.add(pageText);
-            }
+            text.append(stripper.getText(document));
         }
-
-        return pagesText;
+        return text.toString();
     }
 
-    //parse docx consumer
-    public List<String> parseDOCX(InputStream inputStream) throws IOException {
-        List<String> paragraphs = new ArrayList<>();
-
+    public String parseDOCX(InputStream inputStream) throws IOException {
+        StringBuilder text = new StringBuilder();
         try (XWPFDocument document = new XWPFDocument(inputStream)) {
-
             document.getParagraphs().forEach(p -> {
-                if (!p.getText().isBlank()) {
-                    paragraphs.add(p.getText());
+                String t = p.getText();
+                if (t != null && !t.isBlank()) {
+                    text.append(t).append(" ");
                 }
             });
         }
-
-        return paragraphs;
+        return text.toString();
     }
 }

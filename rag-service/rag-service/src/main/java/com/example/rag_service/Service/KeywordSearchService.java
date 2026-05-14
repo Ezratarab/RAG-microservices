@@ -33,7 +33,17 @@ public class KeywordSearchService {
     }
 
     public String extractContent(Document doc) {
-        Object content = doc.get("content");
-        return content != null ? content.toString() : null;
+        Object raw = doc.get("$");
+        if (raw == null) return null;
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode node = mapper.readTree(raw.toString());
+            System.out.println(node.get("content").asText() + "\n***********\n");
+
+            return node.get("content").asText();
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

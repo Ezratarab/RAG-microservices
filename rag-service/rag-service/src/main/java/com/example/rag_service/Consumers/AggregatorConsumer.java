@@ -8,6 +8,7 @@ import com.example.rag_service.Service.ChatService;
 import com.example.rag_service.Service.SinkRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Sinks;
 
@@ -35,32 +36,34 @@ public class AggregatorConsumer {
     public void aggregate(QueryEvent event) {
         String id = event.getQueryId();
         System.out.println("GOT AGGREGATE QUERY");
-
+        System.out.println("RESULTS: ");
+        System.out.println(event.getResults() + "\n\n");
         if ("vector".equals(event.getSource())) {
             vectorResults.put(id, event.getResults());
         } else {
             keywordResults.put(id, event.getResults());
         }
-
-        List<HybridSearchResult> vector = vectorResults.remove(id);
-        List<HybridSearchResult> keyword = keywordResults.remove(id);
+        List<HybridSearchResult> keyword = keywordResults.get(id);
+        List<HybridSearchResult> vector = vectorResults.get(id);
 
         if (vector == null || keyword == null) {
-            if (vector != null) vectorResults.put(id, vector);
-            if (keyword != null) keywordResults.put(id, keyword);
             return;
         }
+        vectorResults.remove(id);
+        keywordResults.remove(id);
 
         List<HybridSearchResult> merged =
                 mergeAndRank(vector, keyword);
-
+        System.out.println("Merged results: ");
+        System.out.println(merged + "\n\n");
         Sinks.Many<String> sink = sinkRegistry.get(id);
 
         String context = merged.stream()
                 .limit(5)
                 .map(HybridSearchResult::getContent)
                 .collect(Collectors.joining("\n\n"));
-
+        System.out.println("CONTEXT: " + context);
+        System.out.println(context + "\n\n");
         chatService.ask(context, event.getQuery())
                 .doOnNext(System.out::print)
                 .doOnNext(sink::tryEmitNext)
@@ -78,11 +81,13 @@ public class AggregatorConsumer {
 
         // vector results
         for (HybridSearchResult r : vector) {
+            r.setId(normalizeId(r.getId()));
             map.put(r.getId(), r);
         }
 
         // keyword results
         for (HybridSearchResult r : keyword) {
+            r.setId(normalizeId(r.getId()));
             map.merge(r.getId(), r, (a, b) -> {
                 a.setKeywordRank(b.getKeywordRank());
                 return a;
@@ -90,16 +95,18 @@ public class AggregatorConsumer {
         }
 
         int k = 75;
-        double vw = 1.7;
-        double kw = 1.0;
+        double vw = 1.0;
+        double kw = 2.5;
 
         for (HybridSearchResult r : map.values()) {
 
-            double kvScore = r.getVectoreRank() == 0 ? 0 :
-                    vw * (1.0 / (k + r.getVectoreRank()));
+            double kvScore = r.getVectoreRank() <= 0
+                    ? 0
+                    : vw * (1.0 / (k + r.getVectoreRank()));
 
-            double kwScore = r.getKeywordRank() == 0 ? 0 :
-                    kw * (1.0 / (k + r.getKeywordRank()));
+            double kwScore = r.getKeywordRank() <= 0
+                    ? 0
+                    : kw * (1.0 / (k + r.getKeywordRank()));
 
             r.setFinalScore(kvScore + kwScore);
         }
@@ -107,6 +114,10 @@ public class AggregatorConsumer {
         return map.values().stream()
                 .sorted(Comparator.comparingDouble(HybridSearchResult::getFinalScore).reversed())
                 .toList();
+    }
+
+    private String normalizeId(String id) {
+        return id.replace("doc:", "");
     }
 
 }

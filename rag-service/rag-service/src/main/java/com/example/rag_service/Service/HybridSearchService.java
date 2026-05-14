@@ -65,11 +65,13 @@ public class HybridSearchService {
         assert vectorResults != null;
         int i = 1;
         for (Document doc : vectorResults) {
-            results.add(new HybridSearchResult(
-                    doc.getText(),
-                    i
-            ));
-            i++;
+            HybridSearchResult result =
+                    new HybridSearchResult(doc.getText(), i++);
+            result.setId(
+                    doc.getId()
+            );
+            results.add(result);
+            log.info("VECTOR RESULT | doc={} | rank={}", doc.getText(), i);
         }
         return results;
     }
@@ -89,6 +91,7 @@ public class HybridSearchService {
             String content = keywordSearchService.extractContent(doc);
 
             HybridSearchResult hybridSearchResult = new HybridSearchResult(content, 0);
+            hybridSearchResult.setId(doc.getId());
             hybridSearchResult.setKeywordRank(i);
             results.add(hybridSearchResult);
             i++;

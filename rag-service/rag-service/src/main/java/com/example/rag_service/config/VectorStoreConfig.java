@@ -46,6 +46,8 @@ public class VectorStoreConfig {
                 .indexName("rag-index")
                 .prefix("doc:")
                 .initializeSchema(true)
+                .contentFieldName("content")
+                .embeddingFieldName("embedding")
                 .build();
     }
 }
