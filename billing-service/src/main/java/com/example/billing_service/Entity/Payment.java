@@ -19,22 +19,15 @@ public class Payment {
     private Long id;
 
 
-    @Column(nullable = false)
-    //taken from user entity in auth_service
-    private Long customerId;
+    // Keycloak user id (JWT "sub") of the paying customer
+    @Column(nullable = false, length = 36)
+    private String customerId;
 
     private int billPrice;
 
-    @Column(nullable = false, length = 16)
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-    private String cardNumber;
-
-    @Column(nullable = false, length = 70)
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-    private String cardHolder;
-
-    @Column(nullable = false, length = 3)
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-    private Integer cvc;
+    // Token/ID from the payment provider (e.g. Stripe PaymentMethod id).
+    // Raw card number, holder and CVC must never reach or be stored by this service (PCI DSS).
+    @Column(nullable = false, length = 255)
+    private String paymentToken;
 
 }

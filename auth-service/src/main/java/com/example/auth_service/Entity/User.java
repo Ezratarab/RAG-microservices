@@ -27,6 +27,8 @@ public class User {
     @Column(nullable = false, length = 20)
     private String email;
 
+    // BCrypt hash only; never the raw password. Excluded from toString so it can't reach logs.
+    @ToString.Exclude
     @Column(nullable = false)
     private String password;
 }

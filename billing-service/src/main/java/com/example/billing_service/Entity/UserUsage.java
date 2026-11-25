@@ -18,8 +18,9 @@ public class UserUsage {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true)
-    private Long customerId;
+    // Keycloak user id (JWT "sub")
+    @Column(nullable = false, unique = true, length = 36)
+    private String customerId;
 
     private double amount;
 }

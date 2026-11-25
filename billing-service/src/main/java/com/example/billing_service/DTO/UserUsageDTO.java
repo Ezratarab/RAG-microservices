@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class UserUsageDTO {
 
-    private Long userId;
+    private String userId;
 
     private double amount;
 }

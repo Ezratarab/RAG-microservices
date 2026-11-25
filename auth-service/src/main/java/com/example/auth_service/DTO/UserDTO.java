@@ -28,5 +28,6 @@ public class UserDTO {
     private String email;
 
     @NotBlank(message = "password should not be empty")
+    @lombok.ToString.Exclude
     private String password;
 }

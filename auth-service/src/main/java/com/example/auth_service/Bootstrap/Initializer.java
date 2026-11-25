@@ -34,7 +34,7 @@ public class Initializer {
 
             tokenService.saveToken(client_id, token);
 
-            System.out.println("Token: " + token);
+            System.out.println("Client token obtained");
         };
     }
 }

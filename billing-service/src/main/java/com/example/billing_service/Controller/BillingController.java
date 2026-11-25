@@ -5,6 +5,8 @@ import com.example.billing_service.DTO.UserUsageDTO;
 import com.example.billing_service.Service.BillingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -14,16 +16,18 @@ public class BillingController {
 
     private final BillingService billingService;
 
+    // The customer is always the authenticated caller (JWT "sub" = Keycloak user id),
+    // never a value taken from the request body.
     @PostMapping("/newCustomer")
     @ResponseStatus(HttpStatus.CREATED)
-    public UserUsageDTO addNewCustomer(@RequestBody Long newCustomerId) {
-        return billingService.addNewCustomer(newCustomerId);
+    public UserUsageDTO addNewCustomer(@AuthenticationPrincipal Jwt jwt) {
+        return billingService.addNewCustomer(jwt.getSubject());
     }
 
     @PostMapping("/pay")
     @ResponseStatus(HttpStatus.CREATED)
-    public Long payBill(@RequestBody PaymentDTO paymentDTO) {
-        return billingService.payBill(paymentDTO);
+    public Long payBill(@AuthenticationPrincipal Jwt jwt, @RequestBody PaymentDTO paymentDTO) {
+        return billingService.payBill(jwt.getSubject(), paymentDTO);
     }
 //
 //    @PostMapping("/addUsage")

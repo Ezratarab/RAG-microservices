@@ -44,18 +44,16 @@ public class UserService {
     private String realm;
 
     public void createUser(UserDTO userRequest) {
-        System.out.println(userRequest);
+        log.info("Creating user {}", userRequest.getUsername());
         User user = User.builder()
                 .phone(userRequest.getPhone())
                 .username(userRequest.getUsername())
                 .email(userRequest.getEmail())
                 .password(passwordEncoder.encode(userRequest.getPassword()))
                 .build();
-        User keycloakUser = user;
-        keycloakUser.setPassword(userRequest.getPassword());
-        String userUUID = keycloakService.createUserInKeycloak(keycloakUser).block();
+        // Raw password goes only to Keycloak; the entity keeps the BCrypt hash.
+        String userUUID = keycloakService.createUserInKeycloak(user, userRequest.getPassword()).block();
         user.setUUID(userUUID);
-        System.out.println(user);
         userRepository.save(user);
         keycloakService.assignClientRole(userUUID, keycloakService.client_uuid).block();
         log.info("User {} is saved", user.getUsername());

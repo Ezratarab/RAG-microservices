@@ -19,20 +19,18 @@ public class BillingService {
     private final UserUsageRepository userUsageRepository;
 
 
-    public Long payBill(PaymentDTO paymentDTO) {
+    public Long payBill(String customerId, PaymentDTO paymentDTO) {
         Payment payment = Payment.builder()
-                .customerId(paymentDTO.getCustomerId())
+                .customerId(customerId)
                 .billPrice(paymentDTO.getBillPrice())
-                .cardNumber(paymentDTO.getCardNumber())
-                .cardHolder(paymentDTO.getCardHolder())
-                .cvc(paymentDTO.getCvc())
+                .paymentToken(paymentDTO.getPaymentToken())
                 .build();
         paymentRepository.save(payment);
         log.info("BILL {} was payed by {}", payment.getId(), payment.getCustomerId());
         return payment.getId();
     }
 
-    private UserUsage addUsage(Long customerId, String transactionType) {
+    private UserUsage addUsage(String customerId, String transactionType) {
         UserUsage userUsage = userUsageRepository.findByCustomerId(customerId);
         if (userUsage == null) {
             userUsage = createUsage(customerId);
@@ -44,19 +42,23 @@ public class BillingService {
         return userUsage;
     }
 
-    private UserUsage createUsage(Long userId) {
+    private UserUsage createUsage(String userId) {
         UserUsage userUsage = new UserUsage();
         userUsage.setCustomerId(userId);
         userUsageRepository.save(userUsage);
         return userUsage;
     }
 
-    public UserUsageDTO addNewCustomer(Long newCustomerId) {
-        UserUsage newUserUsage = UserUsage.builder()
-                .customerId(newCustomerId)
-                .amount(0)
-                .build();
-        userUsageRepository.save(newUserUsage);
+    public UserUsageDTO addNewCustomer(String newCustomerId) {
+        // Idempotent: a caller can only ever have one usage record.
+        UserUsage newUserUsage = userUsageRepository.findByCustomerId(newCustomerId);
+        if (newUserUsage == null) {
+            newUserUsage = UserUsage.builder()
+                    .customerId(newCustomerId)
+                    .amount(0)
+                    .build();
+            userUsageRepository.save(newUserUsage);
+        }
         UserUsageDTO userUsageDTO = UserUsageDTO.builder()
                 .userId(newUserUsage.getCustomerId())
                 .amount(newUserUsage.getAmount())

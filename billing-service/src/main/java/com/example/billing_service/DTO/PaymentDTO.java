@@ -14,15 +14,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class PaymentDTO {
 
-    private int id;
-
-    private Long customerId;
-
+    // The paying customer comes from the caller's JWT, not from this DTO.
     private int billPrice;
 
-    private String cardNumber;
-
-    private String cardHolder;
-
-    private Integer cvc;
+    // Issued by the payment provider's client-side form; card details never pass through this API.
+    private String paymentToken;
 }

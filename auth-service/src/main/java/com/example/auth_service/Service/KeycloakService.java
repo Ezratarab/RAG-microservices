@@ -85,7 +85,7 @@ public class KeycloakService {
                         .bodyToMono(Void.class));
     }
 
-    public Mono<String> createUserInKeycloak(User user) {
+    public Mono<String> createUserInKeycloak(User user, String rawPassword) {
         String url = "http://localhost:" + port + "/admin/realms/" + realm + "/users";
         String clientToken = tokenService.getClientToken(client_id);
         Map<String, Object> body = Map.of(
@@ -95,7 +95,7 @@ public class KeycloakService {
                 "credentials", List.of(
                         Map.of(
                                 "type", "password",
-                                "value", user.getPassword(),
+                                "value", rawPassword,
                                 "temporary", false
                         )
                 ),
@@ -104,7 +104,6 @@ public class KeycloakService {
                         "phone", List.of(user.getPhone() != null ? user.getPhone() : "")
                 )
         );
-        System.out.println(body);
         return webClient.post()
                 .uri(url)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + clientToken)
