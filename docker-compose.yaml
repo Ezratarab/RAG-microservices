@@ -1,329 +1,298 @@
-version: "3.9"
+# Usage:
+#   cp .env.example .env      # then set real passwords in .env (it is git-ignored)
+#   docker compose up -d --build
+#
+# Only two ports are published to your machine:
+#   8000  gateway  -> the API (/auth, /billing, /rag)
+#   8080  Keycloak -> login pages and tokens
+# Everything else is reachable only on the internal Docker network.
+# For local debugging (DB/Redis/Kafka ports, Kafka UI) add the dev override:
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yml up -d
+
+x-app-env: &keycloak-jwt
+  # Tokens say iss=http://localhost:8080/... (KC_HOSTNAME); keys are fetched over the internal network.
+  KEYCLOAK_ISSUER_URI: http://localhost:8080/realms/saas
+  KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/saas/protocol/openid-connect/certs
+
+x-app-healthcheck: &app-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 20
+  start_period: 30s
 
 services:
 
   # =========================
   # ORACLE
   # =========================
-
   oracle-xe:
     image: gvenzl/oracle-xe:21-slim
     container_name: oracle-xe
-
     restart: unless-stopped
-
-    ports:
-      - "1521:1521"
-
     environment:
-      ORACLE_PASSWORD: oracle
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?set ORACLE_PASSWORD in .env}
       ORACLE_DATABASE: ORCLPDB
       TZ: Asia/Jerusalem
-
+      # read by infra/oracle/init/01-create-users.sh on first start
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD in .env}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
+      BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD:?set BILLING_DB_PASSWORD in .env}
     volumes:
       - oracle_data:/opt/oracle/oradata
-
+      - ./infra/oracle/init:/container-entrypoint-initdb.d:ro
     healthcheck:
-      test: [ "CMD-SHELL", "echo 'SELECT 1 FROM dual;' | sqlplus -s system/oracle@localhost:1521/ORCLPDB || exit 1" ]
+      test: [ "CMD", "healthcheck.sh" ]
       interval: 15s
       timeout: 10s
-      retries: 10
-
-    networks:
-      - saas-network
+      retries: 20
+      start_period: 60s
+    networks: [ saas-network ]
 
   # =========================
   # KEYCLOAK
   # =========================
+  # Downloads the Oracle JDBC driver Keycloak needs (instead of committing a jar to git).
+  keycloak-drivers:
+    image: curlimages/curl:8.11.1
+    user: "0:0"
+    entrypoint: [ "/bin/sh", "-c" ]
+    command: >
+      "cd /providers &&
+      ([ -f ojdbc11.jar ] || curl -fsSLo ojdbc11.jar https://repo1.maven.org/maven2/com/oracle/database/jdbc/ojdbc11/23.9.0.25.07/ojdbc11-23.9.0.25.07.jar) &&
+      ([ -f orai18n.jar ] || curl -fsSLo orai18n.jar https://repo1.maven.org/maven2/com/oracle/database/nls/orai18n/23.9.0.25.07/orai18n-23.9.0.25.07.jar)"
+    volumes:
+      - keycloak_providers:/providers
+    restart: "no"
+    networks: [ saas-network ]
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.1
     container_name: keycloak
-
     restart: unless-stopped
-
     depends_on:
       oracle-xe:
         condition: service_healthy
-
+      keycloak-drivers:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
-
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?set KEYCLOAK_ADMIN_USER in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
       KC_DB: oracle
       KC_DB_URL_HOST: oracle-xe
       KC_DB_URL_PORT: 1521
       KC_DB_URL_DATABASE: ORCLPDB
-
       KC_DB_USERNAME: keycloakService
-      KC_DB_PASSWORD: Keycloak123
-
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      # One public URL for tokens no matter how Keycloak is reached; services still call it internally.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
       TZ: Asia/Jerusalem
-
-    command:
-      - start-dev
-      - --spi-jdbc-driver-dir=/opt/keycloak/providers
-
+    # start-dev is for local use only (no TLS). A real deployment needs "start" with HTTPS.
+    command: [ "start-dev" ]
     volumes:
-      - ./oracle-drivers:/opt/keycloak/providers
-
-    networks:
-      - saas-network
+      - keycloak_providers:/opt/keycloak/providers
+    healthcheck:
+      # the image has no curl: plain bash TCP request to the management port
+      test: [ "CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3" ]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks: [ saas-network ]
 
   # =========================
-  # REDIS STACK
+  # REDIS (vector store, keyword index, rate limits)
   # =========================
-
-  redis-stack:
-    image: redis/redis-stack:latest
-    container_name: redis-stack
-
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: redis
     restart: unless-stopped
-
-    ports:
-      - "6379:6379"
-      - "8001:8001"
-
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      REDIS_ARGS: --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
-
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: [ "CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG" ]
       interval: 10s
       timeout: 5s
       retries: 10
-
-    networks:
-      - saas-network
+    networks: [ saas-network ]
 
   # =========================
   # OLLAMA
   # =========================
-
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
-
     restart: unless-stopped
-
-    ports:
-      - "11434:11434"
-
     volumes:
       - ollama_storage:/root/.ollama
-
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:11434/api/tags" ]
+      test: [ "CMD", "ollama", "list" ]
       interval: 15s
       timeout: 5s
       retries: 20
+    networks: [ saas-network ]
 
-    networks:
-      - saas-network
-
-  # =========================
-  # OLLAMA MODEL PULLER
-  # =========================
-
+  # Pulls the models and exits. "stream": false makes each request return only when the
+  # download has finished, so "completed successfully" really means the models are ready.
   ollama-puller:
-    image: curlimages/curl:latest
-    container_name: ollama-puller
-
+    image: curlimages/curl:8.11.1
     depends_on:
       ollama:
         condition: service_healthy
-
     entrypoint: [ "/bin/sh", "-c" ]
-
     command: >
-      "
-      echo 'Pulling llama3.2 model...';
-      curl -X POST http://ollama:11434/api/pull
-      -H 'Content-Type: application/json'
-      -d '{\"name\":\"llama3.2\"}';
-
-      echo 'Pulling nomic-embed-text model...';
-      curl -X POST http://ollama:11434/api/pull
-      -H 'Content-Type: application/json'
-      -d '{\"name\":\"nomic-embed-text\"}';
-
-      echo 'Models downloaded successfully';
-      "
-
+      "curl -fsS -X POST http://ollama:11434/api/pull -H 'Content-Type: application/json' -d '{\"name\":\"llama3.2\",\"stream\":false}' &&
+      curl -fsS -X POST http://ollama:11434/api/pull -H 'Content-Type: application/json' -d '{\"name\":\"nomic-embed-text\",\"stream\":false}'"
     restart: "no"
-
-    networks:
-      - saas-network
+    networks: [ saas-network ]
 
   # =========================
-  # KAFKA
+  # KAFKA (background work only: ingestion jobs, usage events)
   # =========================
-
   kafka:
     image: apache/kafka:4.1.1
     container_name: kafka
-
-    ports:
-      - "29092:29092"   # external (from host)
-      - "9092:9092"     # internal (for docker network)
-
     environment:
       KAFKA_NODE_ID: 1
-
       KAFKA_PROCESS_ROLES: broker,controller
-
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-
-      # listeners (internal + external + controller)
-      KAFKA_LISTENERS: >
-        PLAINTEXT_INTERNAL://:9092,
-        PLAINTEXT_EXTERNAL://:29092,
-        CONTROLLER://:9093
-
-      # how clients connect
-      KAFKA_ADVERTISED_LISTENERS: >
-        PLAINTEXT_INTERNAL://kafka:9092,
-        PLAINTEXT_EXTERNAL://localhost:29092
-
-      # protocol mapping
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: >
-        CONTROLLER:PLAINTEXT,
-        PLAINTEXT_INTERNAL:PLAINTEXT,
-        PLAINTEXT_EXTERNAL:PLAINTEXT
-
-      # inter-broker communication
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://:9092,PLAINTEXT_EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:9092,PLAINTEXT_EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
-
-      # controller quorum (KRaft mode)
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-
-      # storage
-      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
-
-      # cluster id (required for KRaft)
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     healthcheck:
       test: [ "CMD", "bash", "-c", "echo > /dev/tcp/localhost/9092" ]
       interval: 15s
       timeout: 10s
       retries: 10
+    networks: [ saas-network ]
 
-    networks:
-      - saas-network
-
-
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
-
-    ports:
-      - "8084:8080"
-
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-
+  # =========================
+  # GATEWAY (the only API entry point)
+  # =========================
+  gateway-service:
+    build:
+      context: .
+      args: { SERVICE: gateway-service }
+    container_name: gateway-service
+    restart: unless-stopped
     depends_on:
-      - kafka
-
-    networks:
-      - saas-network
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *keycloak-jwt
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      BILLING_SERVICE_URL: http://billing-service:8082
+      RAG_SERVICE_URL: http://rag-service:8083
+    healthcheck:
+      test: [ "CMD", "curl", "-fs", "http://localhost:8000/actuator/health/readiness" ]
+      <<: *app-healthcheck
+    networks: [ saas-network ]
 
   # =========================
   # AUTH SERVICE
   # =========================
-
   auth-service:
     build:
-      context: ./auth-service
-
+      context: .
+      args: { SERVICE: auth-service }
     container_name: auth-service
-
     restart: unless-stopped
-
     depends_on:
-      oracle-xe:
-        condition: service_healthy
-
-      keycloak:
-        condition: service_started
-
-    ports:
-      - "8081:8081"
-
+      oracle-xe: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     environment:
+      <<: *keycloak-jwt
       SPRING_PROFILES_ACTIVE: PRODUCTION
-
-      SPRING_DATASOURCE_URL: jdbc:oracle:thin:@oracle-xe:1521/ORCLPDB
-      SPRING_DATASOURCE_USERNAME: authService
-      SPRING_DATASOURCE_PASSWORD: Auth123
-
+      DB_URL: jdbc:oracle:thin:@oracle-xe:1521/ORCLPDB
+      DB_USERNAME: authService
+      DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: saas
-      KEYCLOAK_PORT: 8080
+      KEYCLOAK_CLIENT_UUID: ${KEYCLOAK_CLIENT_UUID:?set KEYCLOAK_CLIENT_UUID in .env}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?set KEYCLOAK_CLIENT_SECRET in .env}
+    healthcheck:
+      test: [ "CMD", "curl", "-fs", "http://localhost:8081/actuator/health/readiness" ]
+      <<: *app-healthcheck
+    networks: [ saas-network ]
 
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: >
-        http://keycloak:8080/realms/saas
-
-    networks:
-      - saas-network
+  # =========================
+  # BILLING SERVICE
+  # =========================
+  billing-service:
+    build:
+      context: .
+      args: { SERVICE: billing-service }
+    container_name: billing-service
+    restart: unless-stopped
+    depends_on:
+      oracle-xe: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    environment:
+      <<: *keycloak-jwt
+      DB_URL: jdbc:oracle:thin:@oracle-xe:1521/ORCLPDB
+      DB_USERNAME: billingService
+      DB_PASSWORD: ${BILLING_DB_PASSWORD}
+      KAFKA_SERVERS: kafka:9092
+    healthcheck:
+      test: [ "CMD", "curl", "-fs", "http://localhost:8082/actuator/health/readiness" ]
+      <<: *app-healthcheck
+    networks: [ saas-network ]
 
   # =========================
   # RAG SERVICE
   # =========================
-
   rag-service:
     build:
-      context: ./rag-service
-
+      context: .
+      args: { SERVICE: rag-service }
     container_name: rag-service
-
     restart: unless-stopped
-
     depends_on:
-      redis-stack:
-        condition: service_healthy
-
-      kafka:
-        condition: service_healthy
-
-      ollama:
-        condition: service_healthy
-
-    ports:
-      - "8082:8082"
-
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      # wait until the models are downloaded, not just until Ollama is up
+      ollama-puller: { condition: service_completed_successfully }
     environment:
-      SPRING_PROFILES_ACTIVE: PRODUCTION
-
-      SPRING_DATA_REDIS_HOST: redis-stack
-      SPRING_DATA_REDIS_PORT: 6379
-
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-
-      SPRING_AI_OLLAMA_BASE_URL: http://ollama:11434
-
-    networks:
-      - saas-network
-
-# =========================
-# NETWORKS
-# =========================
+      <<: *keycloak-jwt
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_SERVERS: kafka:9092
+      OLLAMA_URL: http://ollama:11434
+      RAG_STORAGE_DIR: /data/uploads
+    volumes:
+      - rag_uploads:/data/uploads
+    healthcheck:
+      test: [ "CMD", "curl", "-fs", "http://localhost:8083/actuator/health/readiness" ]
+      <<: *app-healthcheck
+    networks: [ saas-network ]
 
 networks:
   saas-network:
     driver: bridge
 
-# =========================
-# VOLUMES
-# =========================
-
 volumes:
   oracle_data:
   redis_data:
   ollama_storage:
+  kafka_data:
+  keycloak_providers:
+  rag_uploads:

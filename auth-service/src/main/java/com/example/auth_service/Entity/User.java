@@ -1,11 +1,15 @@
 package com.example.auth_service.Entity;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.Email;
 import lombok.*;
 
+/**
+ * Our own record of a user. Identity and profile (username, email, phone, password)
+ * live only in Keycloak; this table keeps the link plus any app-specific data we add later.
+ */
 @Entity
-@Data
+@Getter
+@Setter
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
@@ -15,20 +19,7 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
-    private String UUID;
-
-    @Column(unique = true, nullable = false)
-    private String username;
-
-    @Column(nullable = false)
-    private String phone;
-
-    @Column(nullable = false, length = 20)
-    private String email;
-
-    // BCrypt hash only; never the raw password. Excluded from toString so it can't reach logs.
-    @ToString.Exclude
-    @Column(nullable = false)
-    private String password;
+    /** Keycloak user id = the "sub" claim in this user's JWTs. */
+    @Column(name = "KEYCLOAK_ID", unique = true, nullable = false, length = 36)
+    private String keycloakId;
 }

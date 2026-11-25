@@ -5,13 +5,12 @@ import opennlp.tools.tokenize.TokenizerModel;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 
 @Service
 public class NlpProcessor {
-
-    private final TokenizerME tokenizer;
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "an", "the", "is", "are", "was", "were", "am",
@@ -20,47 +19,32 @@ public class NlpProcessor {
             "to", "of", "in", "on", "for", "with", "as", "at", "by"
     );
 
+    private final TokenizerME tokenizer;
+
     public NlpProcessor() {
-        try (InputStream modelStream =
-                     getClass().getClassLoader()
-                             .getResourceAsStream("models/en-token.bin")) {
-
-            TokenizerModel model = new TokenizerModel(modelStream);
-            this.tokenizer = new TokenizerME(model);
-
+        try (InputStream modelStream = getClass().getClassLoader().getResourceAsStream("models/en-token.bin")) {
+            if (modelStream == null) {
+                throw new IllegalStateException("models/en-token.bin not found on classpath");
+            }
+            this.tokenizer = new TokenizerME(new TokenizerModel(modelStream));
         } catch (Exception e) {
-            throw new RuntimeException("Failed to load OpenNLP model", e);
+            throw new IllegalStateException("Failed to load OpenNLP model", e);
         }
     }
 
+    /**
+     * Lower-cased words of 2+ letters, without stop words. Because only [a-z] survives,
+     * the result is also safe to put into a RediSearch query (no query-syntax characters).
+     */
     public List<String> extractMeaningfulWords(String text) {
-        String[] tokens = tokenizer.tokenize(text);
-
-        return Arrays.stream(tokens)
+        return Arrays.stream(tokenizer.tokenize(text))
                 .map(String::toLowerCase)
-                .filter(token -> token.matches("[a-zA-Z]{2,}"))// remove punctuation
+                .filter(token -> token.matches("[a-z]{2,}"))
                 .filter(token -> !STOP_WORDS.contains(token))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     public String cleanText(String text) {
         return String.join(" ", extractMeaningfulWords(text));
-    }
-
-    public List<String> tokenize(String text) {
-        int size = 300;
-        String[] words = text.split("\\s+");
-
-        List<String> chunks = new ArrayList<>();
-        StringBuilder chunk = new StringBuilder();
-
-        for (String word : words) {
-            chunk.append(word);
-            if (chunk.length() >= size) {
-                chunks.add(chunk.toString().strip());
-                chunk = new StringBuilder();
-            }
-        }
-        return chunks;
     }
 }

@@ -3,76 +3,48 @@ package com.example.auth_service.Service;
 import com.example.auth_service.DTO.UserDTO;
 import com.example.auth_service.Entity.User;
 import com.example.auth_service.Repository.UserRepository;
-import com.example.auth_service.Security.SecurityConfig;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
-
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.MediaType;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Map;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j //for logs
 public class UserService {
 
-    private final SecurityConfig securityConfig;
     private final UserRepository userRepository;
-    private final TokenService tokenService;
     private final KeycloakService keycloakService;
-    private WebClient webClient;
-    PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    @PostConstruct
-    public void init() {
-        webClient = keycloakService.webClient;
+    /**
+     * Sign-up spans two systems (Keycloak + our DB), which can't share one transaction.
+     * Saga with compensation: if anything after the Keycloak user is created fails,
+     * delete that Keycloak user so no half-created account is left behind.
+     */
+    @Transactional
+    public String createUser(UserDTO request) {
+        log.info("Creating user {}", request.getUsername());
+        String keycloakId = keycloakService.createUser(request);
+        try {
+            keycloakService.assignClientUserRole(keycloakId);
+            userRepository.save(User.builder().keycloakId(keycloakId).build());
+        } catch (RuntimeException e) {
+            log.warn("Sign-up of {} failed after Keycloak user {} was created; rolling back", request.getUsername(), keycloakId, e);
+            try {
+                keycloakService.deleteUser(keycloakId);
+            } catch (RuntimeException cleanup) {
+                log.error("Compensation failed: Keycloak user {} must be removed manually", keycloakId, cleanup);
+            }
+            throw e;
+        }
+        log.info("User {} created with Keycloak id {}", request.getUsername(), keycloakId);
+        return keycloakId;
     }
 
-    @Value("${keycloak.port}")
-    private String port;
-    @Value("${keycloak.realm}")
-    private String realm;
-
-    public void createUser(UserDTO userRequest) {
-        log.info("Creating user {}", userRequest.getUsername());
-        User user = User.builder()
-                .phone(userRequest.getPhone())
-                .username(userRequest.getUsername())
-                .email(userRequest.getEmail())
-                .password(passwordEncoder.encode(userRequest.getPassword()))
-                .build();
-        // Raw password goes only to Keycloak; the entity keeps the BCrypt hash.
-        String userUUID = keycloakService.createUserInKeycloak(user, userRequest.getPassword()).block();
-        user.setUUID(userUUID);
-        userRepository.save(user);
-        keycloakService.assignClientRole(userUUID, keycloakService.client_uuid).block();
-        log.info("User {} is saved", user.getUsername());
-    }
-
-
+    /** Keycloak is the source of truth for profile data, so read it from there. */
     public List<UserDTO> getAllUsers() {
-        List<User> users = userRepository.findAll();
-        return users.stream().map(user -> mapToUserResonse(user)).toList();
+        return keycloakService.getAllUsers();
     }
-
-    private UserDTO mapToUserResonse(User user) {
-        return UserDTO.builder()
-                .customerId(user.getId())
-                .username(user.getUsername())
-                .phone(user.getPhone())
-                .email(user.getEmail())
-                .build();
-    }
-
-
 }

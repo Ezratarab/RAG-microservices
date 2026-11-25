@@ -1,37 +1,29 @@
 package com.example.billing_service.Security;
 
+import com.example.common.security.KeycloakJwtConverter;
+import com.example.common.security.ResourceServerDefaults;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
-@EnableMethodSecurity(securedEnabled = true)
+@EnableMethodSecurity
 public class SecurityConfig {
 
-    private final JWTConverter jwtConverter;
-
-    public SecurityConfig(JWTConverter jwtConverter) {
-        this.jwtConverter = jwtConverter;
+    @Bean
+    public KeycloakJwtConverter jwtConverter(
+            @Value("${jwt.auth.converter.principle-attribute}") String principalAttribute,
+            @Value("${jwt.auth.converter.resource-id}") String resourceId) {
+        return new KeycloakJwtConverter(principalAttribute, resourceId);
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-                .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> {
-                    auth.requestMatchers("/billing").permitAll();
-                    auth.anyRequest().authenticated();
-                })
-                .oauth2ResourceServer(oauth2 ->
-                        oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter))
-                )
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                );
-
-        return http.build();
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, KeycloakJwtConverter converter) throws Exception {
+        // Every /billing endpoint needs a valid token.
+        return ResourceServerDefaults.build(http, converter, auth -> {
+        });
     }
 }

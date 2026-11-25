@@ -1,14 +1,13 @@
 package com.example.billing_service.Entity;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
+import java.math.BigDecimal;
 
 @Entity
-@Data
+@Getter
+@Setter
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
@@ -22,5 +21,7 @@ public class UserUsage {
     @Column(nullable = false, unique = true, length = 36)
     private String customerId;
 
-    private double amount;
+    @Builder.Default
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal amount = BigDecimal.ZERO;
 }

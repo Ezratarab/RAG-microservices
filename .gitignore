@@ -1,0 +1,18 @@
+# Build output
+target/
+out/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Secrets and local data
+.env
+data/
+
+# Binary dependencies come from Maven, not git
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+!**/.mvn/wrapper/maven-wrapper.jar

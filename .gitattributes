@@ -1,0 +1,6 @@
+# Shell scripts run inside Linux containers: always LF, even when checked out on Windows.
+*.sh   text eol=lf
+mvnw   text eol=lf
+*.cmd  text eol=crlf
+*.bin  binary
+*.jar  binary

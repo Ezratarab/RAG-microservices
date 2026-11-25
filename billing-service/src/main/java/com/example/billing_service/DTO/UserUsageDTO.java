@@ -1,10 +1,11 @@
 package com.example.billing_service.DTO;
 
-import jakarta.persistence.Column;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
 
 @Data
 @Builder
@@ -14,5 +15,5 @@ public class UserUsageDTO {
 
     private String userId;
 
-    private double amount;
+    private BigDecimal amount;
 }

@@ -3,6 +3,7 @@ package com.example.billing_service.Controller;
 import com.example.billing_service.DTO.PaymentDTO;
 import com.example.billing_service.DTO.UserUsageDTO;
 import com.example.billing_service.Service.BillingService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,13 +27,7 @@ public class BillingController {
 
     @PostMapping("/pay")
     @ResponseStatus(HttpStatus.CREATED)
-    public Long payBill(@AuthenticationPrincipal Jwt jwt, @RequestBody PaymentDTO paymentDTO) {
+    public Long payBill(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody PaymentDTO paymentDTO) {
         return billingService.payBill(jwt.getSubject(), paymentDTO);
     }
-//
-//    @PostMapping("/addUsage")
-//    @ResponseStatus(HttpStatus.OK)
-//    public UserUsageDTO addUsage(@RequestBody String transactionType) {
-//
-//    }
 }

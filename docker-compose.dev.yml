@@ -1,0 +1,22 @@
+# Local debugging only. Publishes infrastructure ports on 127.0.0.1 (not your network)
+# and adds Kafka UI, so you can run a service from your IDE against the containers:
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yml up -d
+services:
+  oracle-xe:
+    ports: [ "127.0.0.1:1521:1521" ]
+  redis:
+    ports: [ "127.0.0.1:6379:6379" ]
+  ollama:
+    ports: [ "127.0.0.1:11434:11434" ]
+  kafka:
+    ports: [ "127.0.0.1:29092:29092" ]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports: [ "127.0.0.1:8084:8080" ]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on: [ kafka ]
+    networks: [ saas-network ]
